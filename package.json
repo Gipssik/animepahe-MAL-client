@@ -1,5 +1,5 @@
 {
-  "name": "animepahoclient",
+  "name": "animepaheclient",
   "version": "1.0.0",
   "description": "Anime client integrating MAL and AnimePahe",
   "main": "out/main/index.js",
@@ -35,7 +35,7 @@
     "vite": "^5.3.1"
   },
   "build": {
-    "appId": "com.animepahoclient.app",
+    "appId": "com.animepaheclient.app",
     "productName": "AnimePahe Client",
     "files": [
       "out/**/*"
