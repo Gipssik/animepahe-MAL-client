@@ -24,7 +24,7 @@ A desktop app that connects your [MyAnimeList](https://myanimelist.net) library 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/animepaheclient.git
+git clone https://github.com/Gipssik/animepaheclient.git
 cd animepaheclient
 npm install
 ```
