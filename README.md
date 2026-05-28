@@ -68,7 +68,11 @@ Output goes to `out/`. The result is a portable Windows directory (no installer)
 
 ## Disclaimer
 
-This app scrapes AnimePahe for personal use. It does not host or redistribute any content. Use responsibly and in accordance with AnimePahe's and MAL's terms of service.
+This project is intended **for educational purposes only** — it was built to explore Electron, OAuth flows, and web scraping techniques.
+
+It does not host, store, or redistribute any copyrighted content. All video is streamed directly from AnimePahe's own servers. The author is not affiliated with AnimePahe or MyAnimeList.
+
+Use at your own risk and in accordance with AnimePahe's and MAL's terms of service. If you are a content owner and have concerns, please open an issue and the relevant code will be removed promptly.
 
 ## License
 
