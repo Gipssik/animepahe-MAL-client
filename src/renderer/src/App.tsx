@@ -7,6 +7,7 @@ import { Search } from './pages/Search'
 import { AnimeDetail } from './pages/AnimeDetail'
 import { Player } from './pages/Player'
 import { Settings } from './pages/Settings'
+import { PaheSetupModal } from './components/PaheSetupModal'
 
 export default function App() {
   const { page, initFromStorage } = useStore()
@@ -30,6 +31,7 @@ export default function App() {
           {page === 'settings' && <Settings />}
         </main>
       </div>
+      <PaheSetupModal />
     </div>
   )
 }

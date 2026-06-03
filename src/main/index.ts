@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
 import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
 import * as http from 'http'
 import * as crypto from 'crypto'
 import axios from 'axios'
@@ -27,121 +27,82 @@ function saveStore(data: Record<string, unknown>): void {
 
 let store: Record<string, unknown> = {}
 
-// ─── AnimePahe HTTP client ────────────────────────────────────────────────────
-// Uses axios with a manual cookie jar (interceptors) so that:
-//   - Any cookie AnimePahe/Cloudflare sets on request N is sent on request N+1
-//   - Full browser-like headers are sent on every request
-//   - No Electron net.* forbidden-header restrictions apply
+// ─── AnimePahe access (manual Cloudflare clearance) ──────────────────────────
+// AnimePahe is behind Cloudflare Turnstile, which can't be solved reliably from
+// inside Electron. Instead the user solves it once in their real Chrome and
+// pastes the resulting cf_clearance cookie + their browser's User-Agent (see the
+// AnimePahe Access card in Settings). cf_clearance is bound to UA + IP; since the
+// app runs on the same machine (same IP) and replays the exact UA, the cookie is
+// accepted and requests go through session.fetch — no embedded browser needed.
 
-const UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+// Thrown when no clearance cookie is configured yet; the renderer catches this
+// and steers the user to Settings instead of failing silently.
+const SETUP_REQUIRED = 'PAHE_SETUP_REQUIRED'
 
-// ─── DDoS-Guard bypass ───────────────────────────────────────────────────────
-// AnimePahe uses DDoS-Guard which requires a real browser to solve its
-// JavaScript challenge. We open a visible BrowserWindow, let Chromium solve
-// the challenge, then sync the resulting cookies into our axios client.
+// Fallback UA (only used if the user somehow saved a cookie without a UA).
+const UA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`
 
-let warmUpDone = false
-let warmUpPromise: Promise<void> | null = null
-let warmUpWindow: BrowserWindow | null = null
-
-async function syncSessionCookies(): Promise<void> {
-  const cookies = await session.defaultSession.cookies.get({ url: 'https://animepahe.pw' })
-  if (cookies.length) {
-    sessionCookies = cookies.map((c) => `${c.name}=${c.value}`).join('; ')
-  }
+function hasManualClearance(): boolean {
+  return Boolean(store['pahe_cf_clearance'])
 }
 
-// Called before every AnimePahe request; resolves immediately after first pass
-function ensureWarmedUp(): Promise<void> {
-  if (warmUpDone) return Promise.resolve()
-  if (warmUpPromise) return warmUpPromise
+function paheUserAgent(): string {
+  return (store['pahe_user_agent'] as string) || UA
+}
 
-  warmUpPromise = new Promise<void>((resolve) => {
-    warmUpWindow = new BrowserWindow({
-      width: 960,
-      height: 640,
-      title: 'AnimePahe — Checking browser…',
-      webPreferences: { nodeIntegration: false, contextIsolation: true }
-    })
-
-    let settled = false
-    const finish = async () => {
-      if (settled) return
-      settled = true
-      await syncSessionCookies()
-      warmUpDone = true
-      warmUpPromise = null
-      if (warmUpWindow && !warmUpWindow.isDestroyed()) warmUpWindow.close()
-      warmUpWindow = null
-      resolve()
-    }
-
-    // DDoS-Guard challenge finishes → browser navigates to the real page
-    warmUpWindow.webContents.on('did-finish-load', () => {
-      const title = warmUpWindow?.webContents.getTitle() ?? ''
-      const url   = warmUpWindow?.webContents.getURL() ?? ''
-      const isDDG = title.toLowerCase().includes('ddos') ||
-                    title.toLowerCase().includes('checking') ||
-                    url.includes('ddos-guard')
-      if (!isDDG) setTimeout(finish, 800)
-    })
-
-    // User closes the window manually → proceed anyway with whatever cookies we have
-    warmUpWindow.on('closed', () => {
-      warmUpWindow = null
-      if (!settled) { settled = true; warmUpDone = true; warmUpPromise = null; resolve() }
-    })
-
-    setTimeout(() => finish(), 60_000) // hard cap: 60 s
-    warmUpWindow.loadURL('https://animepahe.pw/')
+async function applyManualClearance(): Promise<void> {
+  const cf = store['pahe_cf_clearance'] as string | undefined
+  if (!cf) return
+  session.defaultSession.setUserAgent(paheUserAgent())
+  await session.defaultSession.cookies.set({
+    url: 'https://animepahe.pw',
+    name: 'cf_clearance',
+    value: cf,
+    domain: '.animepahe.pw',
+    path: '/',
+    secure: true,
+    httpOnly: true,
+    sameSite: 'no_restriction',
+    expirationDate: Math.floor(Date.now() / 1000) + 31_536_000
   })
-
-  return warmUpPromise
 }
 
-// Cookie string built from session after warm-up, refreshed on every sync
-let sessionCookies = ''
+async function paheGet(url: string, isPage: boolean): Promise<string> {
+  if (!hasManualClearance()) throw new Error(SETUP_REQUIRED)
 
-const paheClient = axios.create({ timeout: 20000 })
-
-paheClient.interceptors.request.use((config) => {
-  const isPage = config.headers['X-Page-Request'] === '1'
-  delete config.headers['X-Page-Request']
-
-  config.headers = {
-    ...config.headers,
-    'User-Agent': UA,
-    'Accept-Language': 'en-US,en;q=0.9',
-    'sec-ch-ua': '"Google Chrome";v="125", "Chromium";v="125", "Not=A?Brand";v="8"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"Windows"',
-    Referer: 'https://animepahe.pw/',
-    ...(isPage
-      ? {
-          Accept:
-            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Upgrade-Insecure-Requests': '1'
-        }
-      : { Accept: 'application/json, text/plain, */*', 'X-Requested-With': 'XMLHttpRequest' }),
-    ...(sessionCookies ? { Cookie: sessionCookies } : {})
+  const resp = await session.defaultSession.fetch(url, {
+    headers: {
+      'User-Agent': paheUserAgent(),
+      'Accept-Language': 'en-US,en;q=0.9',
+      Referer: 'https://animepahe.pw/',
+      ...(isPage
+        ? {
+            Accept:
+              'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Upgrade-Insecure-Requests': '1'
+          }
+        : { Accept: 'application/json, text/plain, */*', 'X-Requested-With': 'XMLHttpRequest' })
+    }
+  })
+  if (!resp.ok) {
+    throw new Error(
+      resp.status === 403
+        ? 'HTTP 403 — cf_clearance rejected (expired, wrong User-Agent, or IP changed). Re-copy the cookie from your browser in Settings.'
+        : `HTTP ${resp.status}`
+    )
   }
-  return config
-})
+  return resp.text()
+}
 
 async function paheApi(params: Record<string, string | number>): Promise<unknown> {
-  await ensureWarmedUp()
-  const resp = await paheClient.get('https://animepahe.pw/api', { params })
-  return resp.data
+  const searchParams = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) searchParams.set(k, String(v))
+  const text = await paheGet(`https://animepahe.pw/api?${searchParams}`, false)
+  return JSON.parse(text)
 }
 
 async function pahePage(path: string): Promise<string> {
-  await ensureWarmedUp()
-  const resp = await paheClient.get(`https://animepahe.pw${path}`, {
-    headers: { 'X-Page-Request': '1' },
-    responseType: 'text'
-  })
-  return resp.data
+  return paheGet(`https://animepahe.pw${path}`, true)
 }
 
 // ─── MAL OAuth helpers ────────────────────────────────────────────────────────
@@ -266,20 +227,21 @@ function createWindow(): void {
 // ─── Session header modifications ────────────────────────────────────────────
 
 function setupSessionHooks(): void {
+  // Allow the kwik.cx player to be embedded: strip X-Frame-Options and loosen
+  // frame-src/frame-ancestors so the <webview> can host the video iframe.
   session.defaultSession.webRequest.onHeadersReceived(
-    { urls: ['*://kwik.cx/*', '*://*.kwik.cx/*', '*://animepahe.pw/*'] },
+    { urls: ['*://kwik.cx/*', '*://*.kwik.cx/*'] },
     (details, callback) => {
       const headers: Record<string, string[]> = {}
       for (const [k, v] of Object.entries(details.responseHeaders || {})) {
         const lower = k.toLowerCase()
         if (lower === 'x-frame-options') continue
         if (lower === 'content-security-policy') {
-          const modified = (v as string[]).map((policy) =>
+          headers[k] = (v as string[]).map((policy) =>
             policy
               .replace(/frame-ancestors[^;]*/gi, 'frame-ancestors *')
               .replace(/frame-src[^;]*/gi, 'frame-src *')
           )
-          headers[k] = modified
           continue
         }
         headers[k] = v as string[]
@@ -288,6 +250,7 @@ function setupSessionHooks(): void {
     }
   )
 
+  // kwik.cx rejects embeds without an animepahe Referer/Origin — spoof them.
   session.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: ['*://kwik.cx/*', '*://*.kwik.cx/*'] },
     (details, callback) => {
@@ -317,6 +280,28 @@ function registerIpcHandlers(): void {
   ipcMain.handle('storage:getAll', () => store)
 
   // ─── AnimePahe ───────────────────────────────────────────────────────────
+
+  ipcMain.handle('pahe:clearanceStatus', () => ({ configured: hasManualClearance() }))
+
+  ipcMain.handle('pahe:setClearance', async (_e, cfClearance: string, userAgent: string) => {
+    store['pahe_cf_clearance'] = cfClearance.trim()
+    store['pahe_user_agent'] = userAgent.trim()
+    saveStore(store)
+    await applyManualClearance()
+    // Immediately verify so the user gets pass/fail feedback in Settings.
+    try {
+      await paheApi({ m: 'search', q: 'test' })
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: String(e instanceof Error ? e.message : e) }
+    }
+  })
+
+  ipcMain.handle('pahe:clearClearance', () => {
+    delete store['pahe_cf_clearance']
+    delete store['pahe_user_agent']
+    saveStore(store)
+  })
 
   ipcMain.handle('pahe:search', async (_e, query: string) => {
     return paheApi({ m: 'search', q: query })
@@ -489,6 +474,7 @@ function registerIpcHandlers(): void {
 app.whenReady().then(() => {
   store = loadStore()
   setupSessionHooks()
+  applyManualClearance().catch(() => {})
   registerIpcHandlers()
   createWindow()
 

@@ -24,6 +24,11 @@ export interface Preferences {
 
 const RESOLUTION_ORDER = ['1080', '720', '480', '360']
 
+// Main throws Error('PAHE_SETUP_REQUIRED') when no clearance cookie is set yet.
+function isPaheSetupError(e: unknown): boolean {
+  return String(e).includes('PAHE_SETUP_REQUIRED')
+}
+
 const PREF_STORAGE_KEYS: Record<keyof Preferences, string> = {
   preferredAudio: 'preferred_audio',
   preferredResolution: 'preferred_resolution',
@@ -109,6 +114,13 @@ interface Store {
   autoMarkComplete: boolean
   updatePreferences: (prefs: Partial<Preferences>) => Promise<void>
 
+  // AnimePahe access (Cloudflare clearance)
+  paheConfigured: boolean
+  paheSetupNeeded: boolean
+  checkPaheConfigured: () => Promise<void>
+  markPaheConfigured: (configured: boolean) => void
+  dismissPaheSetup: () => void
+
   // Settings / auth actions
   authenticate: (clientId: string, clientSecret: string) => Promise<void>
   logout: () => Promise<void>
@@ -122,6 +134,20 @@ export const useStore = create<Store>((set, get) => ({
   isAuthenticated: false,
   malClientId: '',
   malClientSecret: '',
+
+  paheConfigured: false,
+  paheSetupNeeded: false,
+  checkPaheConfigured: async () => {
+    try {
+      const { configured } = await window.api.pahe.clearanceStatus()
+      set({ paheConfigured: configured })
+    } catch {
+      set({ paheConfigured: false })
+    }
+  },
+  markPaheConfigured: (configured) =>
+    set({ paheConfigured: configured, paheSetupNeeded: configured ? false : get().paheSetupNeeded }),
+  dismissPaheSetup: () => set({ paheSetupNeeded: false }),
 
   preferredAudio: 'jpn',
   preferredResolution: '1080',
@@ -151,11 +177,19 @@ export const useStore = create<Store>((set, get) => ({
   searchLoading: false,
   searchError: null,
   runSearch: async (q) => {
+    if (!get().paheConfigured) {
+      set({ paheSetupNeeded: true })
+      return
+    }
     set({ searchLoading: true, searchError: null, searchResults: [] })
     try {
       const data = await window.api.pahe.search(q)
       set({ searchResults: data.data, searchLoading: false })
     } catch (e) {
+      if (isPaheSetupError(e)) {
+        set({ paheSetupNeeded: true, searchLoading: false })
+        return
+      }
       set({ searchError: String(e), searchLoading: false })
     }
   },
@@ -166,6 +200,10 @@ export const useStore = create<Store>((set, get) => ({
   episodesPage: 1,
   episodesTotalPages: 1,
   openAnime: async (anime) => {
+    if (!get().paheConfigured) {
+      set({ paheSetupNeeded: true })
+      return
+    }
     set({
       currentAnime: anime,
       currentEpisodes: [],
@@ -181,7 +219,11 @@ export const useStore = create<Store>((set, get) => ({
         episodesTotalPages: data.last_page,
         episodesPage: 1
       })
-    } catch {
+    } catch (e) {
+      if (isPaheSetupError(e)) {
+        set({ paheSetupNeeded: true, episodesLoading: false })
+        return
+      }
       set({ episodesLoading: false })
     }
   },
@@ -209,6 +251,10 @@ export const useStore = create<Store>((set, get) => ({
   selectedSource: null,
   playerLoading: false,
   openPlayer: async (animeSession, episodeSession, episodeNum) => {
+    if (!get().paheConfigured) {
+      set({ paheSetupNeeded: true })
+      return
+    }
     set({
       playerLoading: true,
       currentAnimeSession: animeSession,
@@ -223,7 +269,11 @@ export const useStore = create<Store>((set, get) => ({
       const { preferredAudio, preferredResolution } = get()
       const preferred = pickBestSource(data.sources, preferredAudio, preferredResolution)
       set({ currentPlayData: data, selectedSource: preferred, playerLoading: false })
-    } catch {
+    } catch (e) {
+      if (isPaheSetupError(e)) {
+        set({ paheSetupNeeded: true, playerLoading: false })
+        return
+      }
       set({ playerLoading: false })
     }
   },
@@ -273,6 +323,7 @@ export const useStore = create<Store>((set, get) => ({
     set({ isAuthenticated: false, malList: [] })
   },
   initFromStorage: async () => {
+    get().checkPaheConfigured()
     try {
       const all = await window.api.storage.getAll()
       const token = all['mal_access_token'] as string | null

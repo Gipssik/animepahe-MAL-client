@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react'
-import { ExternalLink, KeyRound, LogIn, AlertCircle, Sliders, ListChecks } from 'lucide-react'
+import {
+  ExternalLink,
+  KeyRound,
+  LogIn,
+  AlertCircle,
+  Sliders,
+  ListChecks,
+  ShieldCheck,
+  CheckCircle2
+} from 'lucide-react'
 import { useStore } from '../store/useStore'
 import type { Preferences } from '../store/useStore'
 
@@ -38,6 +47,147 @@ function ToggleRow({
         <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{description}</p>
       </div>
       <Toggle value={value} onChange={onChange} />
+    </div>
+  )
+}
+
+function PaheAccessCard() {
+  const { paheConfigured, paheSetupNeeded, markPaheConfigured } = useStore()
+  const [cfClearance, setCfClearance] = useState('')
+  const [userAgent, setUserAgent] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  const handleSave = async () => {
+    if (!cfClearance.trim() || !userAgent.trim()) {
+      setResult({ ok: false, msg: 'Both the cf_clearance value and the User-Agent are required.' })
+      return
+    }
+    setSaving(true)
+    setResult(null)
+    try {
+      const res = await window.api.pahe.setClearance(cfClearance.trim(), userAgent.trim())
+      if (res.success) {
+        markPaheConfigured(true)
+        setCfClearance('')
+        setResult({ ok: true, msg: 'Cookie accepted — AnimePahe access is working.' })
+      } else {
+        setResult({ ok: false, msg: res.error || 'Request failed.' })
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: String(e) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleClear = async () => {
+    await window.api.pahe.clearClearance()
+    markPaheConfigured(false)
+    setResult(null)
+  }
+
+  return (
+    <div
+      className={`bg-bg-card border rounded-2xl p-6 mb-6 ${
+        paheSetupNeeded && !paheConfigured ? 'border-orange-500/60' : 'border-border'
+      }`}
+    >
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center">
+          <ShieldCheck size={18} className="text-orange-400" />
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold text-white">AnimePahe Access</h2>
+          <p className="text-xs text-gray-500">Cloudflare clearance cookie</p>
+        </div>
+      </div>
+
+      {paheSetupNeeded && !paheConfigured && (
+        <div className="flex items-start gap-2 p-3 mb-4 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+          <AlertCircle size={14} className="text-orange-400 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-orange-300">
+            AnimePahe needs a Cloudflare clearance cookie before you can search or watch. Follow the
+            steps below to set it up.
+          </p>
+        </div>
+      )}
+
+      {paheConfigured && (
+        <div className="flex items-center gap-2 p-3 mb-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+          <CheckCircle2 size={14} className="text-green-400 flex-shrink-0" />
+          <span className="text-sm text-green-400 font-medium">Clearance cookie configured</span>
+        </div>
+      )}
+
+      <div className="p-3 bg-accent/5 border border-accent/20 rounded-lg text-xs text-gray-400 space-y-1 mb-4">
+        <p className="font-medium text-accent">How to get your cookie:</p>
+        <ol className="list-decimal list-inside space-y-1 ml-1">
+          <li>Open <code className="text-accent">animepahe.pw</code> in Chrome and pass the “Verify you are human” check</li>
+          <li>Press F12 → <span className="text-gray-300">Application</span> tab → <span className="text-gray-300">Cookies</span> → animepahe.pw</li>
+          <li>Click <code className="text-accent">cf_clearance</code> and copy its full <span className="text-gray-300">Value</span></li>
+          <li>In the <span className="text-gray-300">Console</span> tab, type <code className="text-accent">navigator.userAgent</code> and copy the result</li>
+          <li>Paste both below. Use the <span className="text-gray-300">same machine</span> — the cookie is tied to your IP and User-Agent.</li>
+        </ol>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1.5">cf_clearance value</label>
+          <textarea
+            value={cfClearance}
+            onChange={(e) => setCfClearance(e.target.value)}
+            placeholder="Paste the cf_clearance cookie value"
+            rows={3}
+            className="w-full bg-bg-primary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-accent transition-colors resize-none font-mono break-all"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1.5">Browser User-Agent</label>
+          <input
+            type="text"
+            value={userAgent}
+            onChange={(e) => setUserAgent(e.target.value)}
+            placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64) ..."
+            className="w-full bg-bg-primary border border-border rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-accent transition-colors font-mono"
+          />
+        </div>
+      </div>
+
+      {result && (
+        <div
+          className={`flex items-start gap-2 p-3 mt-4 rounded-lg border ${
+            result.ok
+              ? 'bg-green-500/10 border-green-500/20'
+              : 'bg-red-500/10 border-red-500/20'
+          }`}
+        >
+          {result.ok ? (
+            <CheckCircle2 size={14} className="text-green-400 mt-0.5 flex-shrink-0" />
+          ) : (
+            <AlertCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
+          )}
+          <p className={`text-xs ${result.ok ? 'text-green-400' : 'text-red-400'}`}>{result.msg}</p>
+        </div>
+      )}
+
+      <div className="flex gap-2 mt-4">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex-1 py-2.5 rounded-lg bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-sm font-semibold transition-colors"
+        >
+          {saving ? 'Verifying…' : 'Save & Test'}
+        </button>
+        {paheConfigured && (
+          <button
+            onClick={handleClear}
+            className="py-2.5 px-4 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-sm font-medium transition-colors"
+          >
+            Clear
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -185,6 +335,9 @@ export function Settings() {
             </div>
           )}
         </div>
+
+        {/* AnimePahe access card */}
+        <PaheAccessCard />
 
         {/* Playback preferences card */}
         <div className="bg-bg-card border border-border rounded-2xl p-6 mb-6">

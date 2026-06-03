@@ -16,7 +16,11 @@ contextBridge.exposeInMainWorld('api', {
     episodes: (sessionId: string, page?: number) =>
       ipcRenderer.invoke('pahe:episodes', sessionId, page),
     playPage: (animeSession: string, episodeSession: string) =>
-      ipcRenderer.invoke('pahe:playPage', animeSession, episodeSession)
+      ipcRenderer.invoke('pahe:playPage', animeSession, episodeSession),
+    clearanceStatus: () => ipcRenderer.invoke('pahe:clearanceStatus'),
+    setClearance: (cfClearance: string, userAgent: string) =>
+      ipcRenderer.invoke('pahe:setClearance', cfClearance, userAgent),
+    clearClearance: () => ipcRenderer.invoke('pahe:clearClearance')
   },
   mal: {
     startAuth: (clientId: string, clientSecret: string) =>

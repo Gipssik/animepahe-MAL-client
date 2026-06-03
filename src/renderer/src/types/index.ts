@@ -135,6 +135,12 @@ export interface WindowApi {
     search: (query: string) => Promise<PaheSearchResponse>
     episodes: (sessionId: string, page?: number) => Promise<PaheEpisodesResponse>
     playPage: (animeSession: string, episodeSession: string) => Promise<PlayPageData>
+    clearanceStatus: () => Promise<{ configured: boolean }>
+    setClearance: (
+      cfClearance: string,
+      userAgent: string
+    ) => Promise<{ success: boolean; error?: string }>
+    clearClearance: () => Promise<void>
   }
   mal: {
     startAuth: (clientId: string, clientSecret: string) => Promise<{ success: boolean; accessToken: string }>

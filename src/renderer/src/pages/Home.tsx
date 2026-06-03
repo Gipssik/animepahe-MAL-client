@@ -71,6 +71,8 @@ export function Home() {
 
   const handleCardClick = async (entry: MALAnimeEntry) => {
     await runSearch(entry.node.title)
+    // If AnimePahe isn't set up, runSearch surfaced the setup modal — stay put.
+    if (useStore.getState().paheSetupNeeded) return
     const results = useStore.getState().searchResults
     if (results.length > 0) {
       openAnime(results[0])
